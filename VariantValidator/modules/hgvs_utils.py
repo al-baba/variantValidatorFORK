@@ -216,16 +216,6 @@ def pvcf_to_hgvs(query, selected_assembly, normalization_direction, reverse_norm
                 except vvhgvs.exceptions.HGVSError as e:
                     # Sort out multiple ALTS from VCF inputs
                     if re.search("([GATCgatc]+)>([GATCgatc]+),([GATCgatc]+)", not_delins):
-                        # header,alts = not_delins.split('>')
-                        # # Split up the alts into a list
-                        # alt_list = alts.split(',')
-                        # # Assemble and re-submit
-                        # for alt in alt_list:
-                        # 	validation['warnings'] = 'Multiple ALT sequences detected: auto-submitting all possible combinations'
-                        # 	validation['write'] = 'false'
-                        # 	refreshed_description = header + '>' + alt
-                        # 	query = {'quibble' : refreshed_description, 'id' : validation['id'], 'warnings' : validation['warnings'], 'description' : '', 'coding' : '', 'coding_g' : '', 'genomic_r' : '', 'genomic_g' : '', 'protein' : '', 'write' : 'true', 'primary_assembly' : primary_assembly, 'order' : ordering}
-                        # 	batch_list.append(query)
                         error = 'Multiple ALTs not supported by this function'
                         raise PseudoVCF2HGVSError(error)
                     else:
@@ -249,9 +239,9 @@ def pvcf_to_hgvs(query, selected_assembly, normalization_direction, reverse_norm
     return hgvs_object
 
 
-def hgvs2vcf(hgvs_genomic, primary_assembly, reverse_normalizer, sf):
+def hgvs2vcf(hgvs_genomic, primary_assembly, reverse_normalizer, sf, extra_flank_bases=0):
     """
-    Simple conversionwhich ensures identity is as 5 prime as possible by adding an extra 5
+    Simple conversion which ensures identity is as 5 prime as possible by adding an extra 5
     prime base. Necessary for most gap handling situations
 
     :param hgvs_genomic:
@@ -384,6 +374,16 @@ def hgvs2vcf(hgvs_genomic, primary_assembly, reverse_normalizer, sf):
                 ref = prev + ref
                 alt = prev + alt
 
+    # Add flank bases if requested
+    if extra_flank_bases > 0:
+        original_pos = pos
+        pos = str(int(pos) - extra_flank_bases)
+        left_flank = sf.fetch_seq(str(reverse_normalized_hgvs_genomic.ac), int(pos) - 1, int(original_pos) - 1)
+        right_flank = sf.fetch_seq(str(reverse_normalized_hgvs_genomic.ac), int(original_pos) + len(ref) - 1,
+                                   int(original_pos) + len(ref) - 1 + extra_flank_bases)
+        ref = left_flank + ref + right_flank
+        alt = left_flank + alt + right_flank
+
     # Dictionary the VCF
     vcf_dict = {'chr': chr, 'pos': pos, 'ref': ref, 'alt': alt, 'normalized_hgvs': reverse_normalized_hgvs_genomic}
     return vcf_dict
@@ -473,11 +473,22 @@ def report_hgvs2vcf(hgvs_genomic, primary_assembly, reverse_normalizer, sf):
         start = start - 1
         # Recover sequences
         hgvs_del_seq = sf.fetch_seq(str(reverse_normalized_hgvs_genomic.ac), start, end)
-        pre_base = sf.fetch_seq(str(reverse_normalized_hgvs_genomic.ac), adj_start, start)
+        post_base = None
+        try:
+            pre_base = sf.fetch_seq(str(reverse_normalized_hgvs_genomic.ac), adj_start, start)
+        except vvhgvs.exceptions.HGVSDataNotAvailableError as e:
+            if "(start out of range (-1)" in str(e):
+                post_base = sf.fetch_seq(str(reverse_normalized_hgvs_genomic.ac), end, end + 1)
         # Assemble
         pos = str(start)
-        ref = pre_base + hgvs_del_seq
-        alt = pre_base
+        if post_base is None:
+            ref = pre_base + hgvs_del_seq
+            alt = pre_base
+        else:
+            ref = hgvs_del_seq + post_base
+            alt = post_base
+            if pos == "0":
+                pos = "1"
 
     # inv
     elif reverse_normalized_hgvs_genomic.posedit.edit.type == 'inv':
@@ -719,7 +730,7 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
     normalized_hgvs_genomic = hn.normalize(hgvs_genomic_variant)
 
     # Variants in/on a genomic gap that cause issues need sorting by making them span so coordinates do not reverse
-    if hgvs_genomic.type is not "g":
+    if hgvs_genomic.type != "g":
         hgvs_genomic_g = vm.n_to_g(normalized_hgvs_genomic, genomic_ac)
         try:
             hn.normalize(hgvs_genomic_g)
@@ -982,7 +993,7 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
 
         # Loop and add bases - up to the range defined below - unless we go into an intron/past the transcript
         for push in range(50):
-            post = sf.fetch_seq(str(normalized_hgvs_genomic.ac), working_pos-1, working_pos)
+            post = sf.fetch_seq(str(normalized_hgvs_genomic.ac), working_pos - 1, working_pos)
             push_ref = push_ref + post
             push_alt = push_alt + post
 
@@ -996,7 +1007,7 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
                 if hgvs_genomic.type != "g":
                     normlize_check_mapped = vm.n_to_g(normlize_check_variant, genomic_ac)
                 else:
-                    normlize_check_mapped = vm.g_to_n(normlize_check_variant, tx_ac)
+                    normlize_check_mapped = vm.g_to_n(normlize_check_variant, tx_ac, alt_aln_method)
 
             # Catch out-of-bounds errors
             except vvhgvs.exceptions.HGVSInvalidIntervalError:
@@ -1014,7 +1025,7 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
 
             # Check here for the gap (Has it been crossed?) Note: if gap in tx, we have the whole gap spanned
             if (((len(normlize_check_mapped.posedit.edit.ref) != len(normlize_check_variant.posedit.edit.ref) and
-                 len(normlize_check_mapped.posedit.edit.ref) > 1))
+                  len(normlize_check_mapped.posedit.edit.ref) > 1))
                     or
                     (normlize_check_variant.posedit.edit.type == 'identity')
                     and len(normlize_check_mapped.posedit.edit.alt) != len(normlize_check_variant.posedit.edit.ref)):
@@ -1105,7 +1116,7 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
                             and
                             (map_back.posedit.pos.end.base <=
                              normalized_hgvs_genomic.posedit.pos.end.base + 1)
-                            )
+                    )
                             or
                             (
                                     (map_back_rn.posedit.pos.end.base >=
@@ -1187,7 +1198,6 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
                                         merged_variant = vm.g_to_n(merged_variant, tx_ac)
                                 except AttributeError:
                                     pass
-
                             needs_a_push = True  # Keep the new vcf
                             break
                     else:
@@ -1265,7 +1275,7 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
                             and
                             (map_back.posedit.pos.end.base <=
                              normalized_hgvs_genomic.posedit.pos.end.base + 1)
-                            )
+                    )
                             or
                             (
                                     (map_back_rn.posedit.pos.end.base >=
@@ -1340,10 +1350,24 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
                                 else:
                                     merged_variant = pre_merged_variant
                             except utils.mergeHGVSerror:
-                                needs_a_push = True  # Return new vcf only
-                                break
+                                try:
+                                    if v1.posedit.pos.start.base < v2.posedit.pos.start.base:
+                                        pre_merged_variant = mrg([v1, v2], hn, final_norm=False)
+                                    else:
+                                        pre_merged_variant = mrg([v2, v1], hn, final_norm=False)
+                                    if "g" in pre_merged_variant.type:
+                                        merged_variant = vm.g_to_n(pre_merged_variant, tx_ac)
+                                    else:
+                                        merged_variant = pre_merged_variant
+                                except utils.mergeHGVSerror:
+                                    needs_a_push = False  # Return new vcf only
+                                    break
+                                except vvhgvs.exceptions.HGVSParseError:
+                                    needs_a_push = False  # Return new vcf only
+                                    break
+
                             except vvhgvs.exceptions.HGVSParseError:
-                                needs_a_push = True  # Return new vcf only
+                                needs_a_push = False  # Return new vcf only
                                 break
 
                             # Ensure merged variant is not in a "non-intron" if mapped back to n.
@@ -1369,6 +1393,7 @@ def hard_right_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, 
                                                 merged_variant = pre_merged_variant
                                     # Map back to n.
                                     if "g" in merged_variant.type:
+                                        identifying_g_variant = merged_variant
                                         merged_variant = vm.g_to_n(merged_variant, tx_ac)
                                 except AttributeError:
                                     pass
@@ -1444,7 +1469,7 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
     reverse_normalized_hgvs_genomic = reverse_normalizer.normalize(hgvs_genomic_variant)
 
     # Variants in/on a genomic gap that cause issues need sorting by making them span so coordinates do not reverse
-    if hgvs_genomic.type is not "g":
+    if hgvs_genomic.type != "g":
         hgvs_genomic_g = vm.n_to_g(reverse_normalized_hgvs_genomic, genomic_ac)
         try:
             hn.normalize(hgvs_genomic_g)
@@ -1721,7 +1746,7 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                 if hgvs_genomic.type != "g":
                     normlize_check_mapped = vm.n_to_g(normlize_check_variant, genomic_ac)
                 else:
-                    normlize_check_mapped = vm.g_to_n(normlize_check_variant, tx_ac)
+                    normlize_check_mapped = vm.g_to_n(normlize_check_variant, tx_ac, alt_aln_method)
             # Catch out-of-bounds errors
             except vvhgvs.exceptions.HGVSInvalidIntervalError:
                 needs_a_push = False
@@ -1738,14 +1763,13 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
 
             # Check here for the gap (Has it been crossed?) Note: if gap in tx, we have the whole gap spanned
             if (((len(normlize_check_mapped.posedit.edit.ref) != len(normlize_check_variant.posedit.edit.ref) and
-                 len(normlize_check_mapped.posedit.edit.ref) > 1))
+                  len(normlize_check_mapped.posedit.edit.ref) > 1))
                     or
                     (normlize_check_variant.posedit.edit.type == 'identity')
                     and len(normlize_check_mapped.posedit.edit.alt) != len(normlize_check_variant.posedit.edit.ref)):
 
                 # Add the identifying variant
                 identifying_variant = normlize_check_variant
-
                 if push == 0:  # Already crossing the gap so return original vcf
                     end_seq_check_variant = copy.deepcopy(normlize_check_variant)
                     # end_seq_check_variant.posedit.edit.alt = end_seq_check_variant.posedit.edit.ref
@@ -1789,7 +1813,6 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                     if end_seq_check_mapped.posedit.pos.end.offset != 0:
                         end_offset = True
                 if start_offset is True or end_offset is True:
-
                     # To identify the gap, we need to span it before mapping back
                     if end_offset is True:
                         end_seq_check_mapped.posedit.pos.end.base = end_seq_check_mapped.posedit.pos.start.base + 1
@@ -1833,7 +1856,7 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                             and
                             (map_back.posedit.pos.end.base <=
                              reverse_normalized_hgvs_genomic.posedit.pos.end.base + 1)
-                            )
+                    )
                             or
                             (
                                     (map_back_rn.posedit.pos.end.base >=
@@ -1864,10 +1887,7 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                         # We merge the "gap" variant and the variant itself
                         v1 = hgvs_genomic
                         v2 = map_back
-                        # if v2.posedit.edit.type == "identity":
-                        #     needs_a_push = True  # Return new vcf only
-                        #     push_pos_by = push_pos_by + 1
-                        #     break
+
                         if "g" not in hgvs_genomic.type:
                             v1 = vm.n_to_g(hgvs_genomic, genomic_ac)
                             v2 = vm.n_to_g(map_back, genomic_ac)
@@ -1933,20 +1953,19 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
 
                 # Or we have identified the gap again at the expected position
                 if len(end_seq_check_mapped.posedit.edit.ref) != len(end_seq_check_variant.posedit.edit.ref):
-
                     """
                     At this stage, we have done the following, illustrated by a  gap in transcript
-                    
+
                     g. NNNNNNNNNN
                     n. NNNNNNN--N
-                    
+
                     We forced the gap to be projected by making the end_seq_check_variant n.=
-                    
+
                              NN  Deletion in g.
                              |
                     g. NNNNNNNN
                     n. NNNNNNNN                   
-                    
+
                     So we need to make the g. == again before mapping back, which will make an ins in the n.
                     """
 
@@ -2009,7 +2028,7 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                             and
                             (map_back.posedit.pos.end.base <=
                              reverse_normalized_hgvs_genomic.posedit.pos.end.base + 1)
-                            )
+                    )
                             or
                             (
                                     (map_back_rn.posedit.pos.end.base >=
@@ -2033,6 +2052,14 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                                     and
                                     (map_back_rn.posedit.pos.start.base <=
                                      reverse_normalized_hgvs_genomic.posedit.pos.end.base + 1)
+                            )
+                            or
+                            (
+                                    (map_back.posedit.pos.start.base <=
+                                     reverse_normalized_hgvs_genomic.posedit.pos.start.base - 1)
+                                    and
+                                    (map_back.posedit.pos.end.base >=
+                                     reverse_normalized_hgvs_genomic.posedit.pos.end.base + 1)
                             )):
 
                         # Create a variant that reflects the impact of the gap.
@@ -2040,14 +2067,32 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                         # We merge the "gap" variant and the variant itself
                         v1 = hgvs_genomic
                         v2 = map_back
-                        # if v2.posedit.edit.type == "identity":
-                        #     needs_a_push = True  # Return new vcf only
-                        #     push_pos_by = push_pos_by + 1
-                        #     break
 
                         if "g" not in hgvs_genomic.type:
-                            v1 = vm.n_to_g(hgvs_genomic, genomic_ac)
-                            v2 = vm.n_to_g(map_back, genomic_ac)
+                            if (hgvs_genomic.posedit.edit.type == "dup"
+                                    and map_back.posedit.edit.type == "del"
+                                    and hgvs_genomic.posedit.edit.ref == map_back.posedit.edit.ref):
+                                v1 = vm.n_to_g(hgvs_genomic, genomic_ac)
+                                v2 = vm.n_to_g(map_back, genomic_ac)
+
+                            elif (hgvs_genomic.posedit.edit.type == "del"
+                                    and map_back.posedit.edit.type == "dup"
+                                    and hgvs_genomic.posedit.edit.ref == map_back.posedit.edit.ref):
+                                v1 = vm.n_to_g(hgvs_genomic, genomic_ac)
+                                v2 = vm.n_to_g(map_back, genomic_ac)
+
+                            elif ((map_back.posedit.edit.type == "dup" or map_back.posedit.edit.type == "del") and
+                                  hgvs_genomic.posedit.pos.start.base > map_back.posedit.pos.end.base + 1):
+                                v1 = vm.n_to_g(hgvs_genomic, genomic_ac)
+                                v3 = hp.parse_hgvs_variant(f"{v2.ac}:{v2.type}.{v2.posedit.pos.start.base}_"
+                                                           f"{v2.posedit.pos.end.base}"
+                                                           f"{v2.posedit.edit.ref}=")
+                                v2 = vm.n_to_g(v3, genomic_ac)
+
+                            else:
+                                v1 = vm.n_to_g(hgvs_genomic, genomic_ac)
+                                v2 = vm.n_to_g(map_back, genomic_ac)
+
 
                         # Known examples of incorrect formatting from vm
                         ################################################
@@ -2083,6 +2128,7 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                                 else:
                                     pre_merged_variant = mrg([v2, v1], reverse_normalizer, final_norm=False)
                                 if "g" in pre_merged_variant.type:
+                                    # identifying_g_variant = pre_merged_variant
                                     merged_variant = vm.g_to_n(pre_merged_variant, tx_ac)
                                 else:
                                     merged_variant = pre_merged_variant
@@ -2111,6 +2157,7 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
                                             if (test_merged_variant.posedit.pos.start.offset == 0
                                                     and test_merged_variant.posedit.pos.start.offset == 0):
                                                 merged_variant = pre_merged_variant
+
                                     # Map back to n.
                                     if "g" in merged_variant.type:
                                         merged_variant = vm.g_to_n(merged_variant, tx_ac)
@@ -2147,7 +2194,7 @@ def hard_left_hgvs2vcf(hgvs_genomic, primary_assembly, hn, reverse_normalizer, s
         # Populate vcf dict
         if needs_a_push is True:
             # Re-sep pos-ref-alt
-            pos = (int(pos) - (push_pos_by-1))
+            pos = (int(pos) - (push_pos_by - 1))
             ref = push_ref
             alt = push_alt
 
@@ -2221,7 +2268,7 @@ def hgvs_ref_alt(hgvs_variant, sf):
 #
 
 # <LICENSE>
-# Copyright (C) 2016-2023 VariantValidator Contributors
+# Copyright (C) 2016-2024 VariantValidator Contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as

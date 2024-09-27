@@ -176,6 +176,7 @@ class TestConfigValues(unittest.TestCase):
             self.config.write(fh)
 
     def test_file_structure(self):
+
         self.assertCountEqual(self.config.sections(), ['mysql', 'seqrepo', 'postgres',  'logging', 'Entrez'])
         self.assertCountEqual(list(self.config['mysql']), ['host', 'port', 'database', 'user', 'password', 'version'])
         self.assertCountEqual(list(self.config['seqrepo']), ['version', 'location', 'require_threading'])
@@ -230,7 +231,7 @@ class TestConfigValues(unittest.TestCase):
         shutil.move(self.original, self.filename)
 
 # <LICENSE>
-# Copyright (C) 2016-2023 VariantValidator Contributors
+# Copyright (C) 2016-2024 VariantValidator Contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as

@@ -5,6 +5,7 @@ import re
 import vvhgvs.exceptions
 import logging
 import json
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +46,23 @@ class Database(vvDBInsert.Mixin):
         return row
 
     # From data
-    def data_add(self, accession, validator):
+    def data_add(self, accession, validator, genome_build=None):
         """
         # Add accurate transcript descriptions to the database
         :param accession:
         :param validator:
         :return:
         """
-        self.update_transcript_info_record(accession, validator)
+        self.update_transcript_info_record(accession, validator, genome_build=genome_build)
         entry = self.in_entries(accession, 'transcript_info')
+        i = 1
+        while i in range(10):
+            if 'none' in entry:
+                i += 1
+                time.sleep(2)
+                entry = self.in_entries(accession, 'transcript_info')
+            else:
+                break
         return entry
 
     def in_entries(self, entry, table):
@@ -172,7 +181,7 @@ class Database(vvDBInsert.Mixin):
             They also interchangeably decide whether or not they accept version information
             Therefore, assume they do not and check using Accession.Version Python split 
             """
-            enst_accession, enst_version = accession.split('.')
+            enst_accession, enst_version = accession.strip().split('.')
             try:
                 genome_build = kwargs['genome_build']
             except KeyError:
@@ -182,16 +191,16 @@ class Database(vvDBInsert.Mixin):
             if genome_build is None:
                 raise utils.DatabaseConnectionError("Connection to Ensembl database requires specification of "
                                                     "a genome build (GRCh37 or GRCh38)")
-            elif genome_build is 'GRCh37' or genome_build is 'GRCh38':
+            elif genome_build == 'GRCh37' or genome_build == 'GRCh38':
                 ens_record = utils.ensembl_rest(id=enst_accession, endpoint="/lookup/id/", genome=genome_build)
                 ens_json = ens_record['record']
 
             # Check version
             try:
                 if enst_version in str(ens_json['version']):
-                    version = accession
+                    version = accession.strip()
                     description = str(ens_json['display_name'])
-                    genbank_symbol = description.split('-')[0]
+                    genbank_symbol = "-".join(description.split('-')[0:-1])
                     if ens_json['is_canonical'] == 1:
                         select_tx = 'Ensembl'
                     else:
@@ -222,12 +231,14 @@ class Database(vvDBInsert.Mixin):
                             hgnc_id = xref['primary_id']
                             gene_name = xref['description']
 
+
                     # Get MANE status and Ensembl canonical status
                     mane_select = False
                     ensembl_select = False
                     mane_plus_clinical = False
                     if select_tx == "Ensembl":
                         ensembl_select = True
+
                     tark_record = utils.ensembl_tark(id=enst_accession + '.' + enst_version,
                                                      endpoint="/api/transcript/stable_id_with_version/")
                     tark_json = tark_record['record']
@@ -238,6 +249,10 @@ class Database(vvDBInsert.Mixin):
                             select_tx = 'MANE'
                         else:
                             mane_plus_clinical = True
+
+                    description_parts = description.split('-')
+                    if len(description_parts) == 3:
+                        description = description_parts[1] + '-' + description_parts[2]
 
                     # Compile metadata dictionary
                     variant = {"db_xref": {"ensemblgene": ensemblgene_id,
@@ -259,6 +274,8 @@ class Database(vvDBInsert.Mixin):
                     warning = "Ensembl transcript %s is not identified in the Ensembl APIs" % accession
                     raise utils.DatabaseConnectionError(warning)
             except TypeError:
+                import traceback
+                traceback.print_exc()
                 connection_error = "Cannot retrieve data from Ensembl REST for record %s" % accession
                 if bypass_with_symbol is not False:
                     try:
@@ -275,11 +292,10 @@ class Database(vvDBInsert.Mixin):
             """
             Search Entrez for corresponding record for the RefSeq ID
             """
-
             try:
                 record = validator.entrez_efetch(db="nucleotide", id=accession, rettype="gb", retmode="text")
             except IOError:
-                connection_error = "Cannot retrieve data from NCBI Entrez for record %s" % accession
+                connection_error = "Cannot currently retrieve data from NCBI Entrez for record %s" % accession
                 if bypass_with_symbol is not False:
                     try:
                         self.update_gene_stable_identifiers(bypass_with_symbol)
@@ -432,6 +448,7 @@ class Database(vvDBInsert.Mixin):
         except Exception as e:
             logger.debug("Except pass, %s", e)
             logger.info("Unable to connect to HGNC with symbol %s", genbank_symbol)
+            hgnc_data = None
         if hgnc_data is not None:
             variant["map"] = hgnc_data["map_loc"]
             variant["note"] = hgnc_data["gene_name"]
@@ -530,7 +547,7 @@ class Database(vvDBInsert.Mixin):
         return ref_type
 
 # <LICENSE>
-# Copyright (C) 2016-2023 VariantValidator Contributors
+# Copyright (C) 2016-2024 VariantValidator Contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as

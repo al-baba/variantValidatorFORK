@@ -1,7 +1,7 @@
 # Installation
 
-These instructions will allow you to install the package and accompanying databases on Linux. Mac OS X computers operate similarly.
-For any other systems, or if you cannot install the databases, we recommend installing via [docker](DOCKER.md).
+The instruction in this manual will allow you to install the package and accompanying databases on Linux. Mac OS X computers operate similarly.
+For any other systems, or if you cannot install the databases, we recommend installing via [docker](https://github.com/openvar/rest_variantValidator/blob/master/docs/DOCKER.md)
 
 ## Pre-requisites
 
@@ -23,11 +23,11 @@ $ git clone https://github.com/openvar/variantValidator.git
 $ cd variantValidator/
 ```
 
-## Python 3.6 environment
+## Python environment
 
 When installing VariantValidator we recommend using a virtual environment, as it requires specific versions of several libraries including python and sqlite. This can be done either via conda **or** pip.
 
-#### Via conda  
+#### Via conda (Recommended) 
 After [installing conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/) you can create a new virtual environment with the correct python and sqlite versions by running:
 ```
 $ conda env create -f environment.yml
@@ -42,7 +42,6 @@ If you already have the right versions of python (>=3.6) and sqlite (>=3.8), the
 ```
 $ python -m venv vvenv
 $ source activate vvenv
-$ pip install -r requirements.txt
 ```
 
 ## Additional steps for running MariaDB
@@ -62,7 +61,7 @@ Hint: your new environment vvenv should still be activated from the previous ste
 
 To install VariantValidator within your virtual environment run:
 ```
-$ pip install -e .
+$ pip install .
 ```
 
 ## Setting up validator database (MySQL)
@@ -138,13 +137,13 @@ To fill this database, download the gzipped uta genetics database, and upload it
 *Postgres < version 14.0*
 ```
 $ wget --output-document=VVTA_202x_xx.noseq.psql.gz https://www528.lamp.le.ac.uk/vvdata/vvta/VVTA_202x_xx.noseq.psql.gz
-$ gzip -cdq VVTA_202x_xx.noseq.psql.gz | psql -U <USER> -v ON_ERROR_STOP=0 -d vvta -Eae
+$ gzip -cdq vvta_202x_xx.noseq.psql.gz | psql -U <USER> -v ON_ERROR_STOP=1 -d vvta -Eae
 ```
 
 *Postgres >= version 14.0*
 ```
 $ wget --output-document=VVTA_202x_xx.noseq.psql.gz https://www528.lamp.le.ac.uk/vvdata/vvta/VVTA_202x_xx.noseq.psql.gz
-$ gzip -cdq -k VVTA_202x_xx.noseq.psql.gz | sed 's/anyarray/anycompatiblearray/g' | psql -U <USER> -v ON_ERROR_STOP=0 -d vvta -Eae
+$ gzip -cdq -k vvta_202x_xx.noseq.psql.gz | sed 's/anyarray/anycompatiblearray/g' | psql -U <USER> -v ON_ERROR_STOP=1 -d vvta -Eae
 ```
 
 ## Configuration
@@ -153,14 +152,4 @@ Before using VariantValidator some configuration is required, as described in th
 
 ## Developers
 
-To work on the VariantValidator code, you'll need to install additional dependencies and install VariantValidator in an editable manner. Tests can be run using PyTest.
-
-```bash
-cd variantValidator/
-pip install -r requirements.txt
-pip install -r requirements_dev.txt
-pip install -e .
-pytest
-```
-  
-Please make all Pull Requests to the develop branch. Id you are unsure, contact admin via [issues](https://github.com/openvar/variantValidator/issues)
+Please make all Pull Requests to the develop branch. If you are unsure, contact admin via [issues](https://github.com/openvar/variantValidator/issues)

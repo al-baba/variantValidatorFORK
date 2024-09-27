@@ -9,7 +9,7 @@ class Variant(object):
     """
 
     def __init__(self, original, quibble=None, warnings=None, write=True, primary_assembly=False, order=False,
-                 selected_assembly=False):
+                 selected_assembly=False, reformat_output=False):
         self.original = original
         if quibble is None:
             self.quibble = original
@@ -21,6 +21,7 @@ class Variant(object):
         self.post_format_conversion = None  # Used for first gapped_mapping function
         self.pre_RNA_conversion = None
         self.input_parses = None  # quibble as hgvs variant object
+        self.transcript_type = None
 
         if warnings is None:
             self.warnings = []
@@ -45,6 +46,10 @@ class Variant(object):
         self.timing = {}
         self.refsource = None
         self.reftype = None
+        self.expanded_repeat = None
+
+        # Set reformat options
+        self.reformat_output = reformat_output
 
         # Normalizers and mappers
         self.hn = None
@@ -140,6 +145,16 @@ class Variant(object):
             self.set_reftype()
         except fn.VariantValidatorError:
             return True
+
+        # Upper case characters in the edit type e.g. Ins dUP
+        edit_type_patterns = ['delins', 'dup', 'ins', 'del']  # 'delins' is before 'del'
+        for pattern in edit_type_patterns:
+            matches = re.findall(pattern, self.quibble, re.IGNORECASE)
+            for match in matches:
+                if match.lower() != match:
+                    caution = f'Edit type {match} should be in the lower case, i.e. {match.lower()}'
+                    self.warnings.append(caution)
+                    self.quibble = self.quibble.replace(match, match.lower())
 
         return False
 
@@ -251,7 +266,7 @@ class Variant(object):
         return refined
 
 # <LICENSE>
-# Copyright (C) 2016-2023 VariantValidator Contributors
+# Copyright (C) 2016-2024 VariantValidator Contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as

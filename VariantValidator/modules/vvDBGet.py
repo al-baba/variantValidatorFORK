@@ -4,7 +4,6 @@ from . import vvDBInit
 
 logger = logging.getLogger(__name__)
 
-
 class Mixin(vvDBInit.Mixin):
     """
     Most of the functions in DBGet generate queries for retrieving data from the databases.
@@ -131,6 +130,12 @@ class Mixin(vvDBInit.Mixin):
         query = "SELECT * FROM stableGeneIds WHERE hgnc_id = '%s'" % hgnc_id
         return self.execute(query)
 
+    def get_transcripts_from_annotations(self, statement):
+        query = "SELECT * FROM transcript_info WHERE transcriptVariant LIKE '%{}%'".format(statement)
+
+        # print("My query is: ", query)
+        return self.execute_all(query)
+
     def get_db_version(self):
         """
         :return: current version of the Validator database
@@ -152,6 +157,8 @@ class Mixin(vvDBInit.Mixin):
         # Provide direct links to reference sequence records
         # Add urls
         report_urls = {}
+
+        # Refseq
         if 'NM_' in dict_out['hgvs_transcript_variant'] or 'NR_' in dict_out['hgvs_transcript_variant']:
             report_urls['transcript'] = 'https://www.ncbi.nlm.nih.gov' \
                                         '/nuccore/%s' % dict_out['hgvs_transcript_variant'].split(':')[0]
@@ -173,13 +180,31 @@ class Mixin(vvDBInit.Mixin):
                 report_urls['lrg'] = 'http://ftp.ebi.ac.uk' \
                                      '/pub/databases/lrgex' \
                                      '/pending/%s.xml' % dict_out['hgvs_lrg_variant'].split(':')[0]
-        # Ensembl needs to be added at a later date
+        
+        # Ensembl
+        # When selectec_assembly is GRCh37
+        if 'ENST' in dict_out['hgvs_transcript_variant'] and str(dict_out['selected_assembly']).lower() == 'grch37':
+            report_urls['transcript'] = 'https://grch37.ensembl.org/Homo_sapiens/Transcript/Summary?' \
+                                        'db=core;t=%s' % dict_out['hgvs_transcript_variant'].split(':')[0]
+        if 'ENSP' in str(dict_out['hgvs_predicted_protein_consequence']['slr']) and str(dict_out['selected_assembly']).lower() == 'grch37':
+            report_urls['protein'] = 'https://grch37.ensembl.org/Homo_sapiens/Transcript/ProteinSummary?' \
+                                     'db=core;p=%s' % str(
+                                        dict_out['hgvs_predicted_protein_consequence']['slr']).split(':')[0]
+        
+        # When selected_assembly is GRCh38
+        if 'ENST' in dict_out['hgvs_transcript_variant'] and str(dict_out['selected_assembly']).lower() == 'grch38':
+            report_urls['transcript'] = 'https://www.ensembl.org/Homo_sapiens/Transcript/Summary?' \
+                                        'db=core;t=%s' % dict_out['hgvs_transcript_variant'].split(':')[0]
+        if 'ENSP' in str(dict_out['hgvs_predicted_protein_consequence']['slr']) and str(dict_out['selected_assembly']).lower() == 'grch38':
+            report_urls['protein'] = 'https://www.ensembl.org/Homo_sapiens/Transcript/ProteinSummary?' \
+                                     'db=core;p=%s' % str(
+                                        dict_out['hgvs_predicted_protein_consequence']['slr']).split(':')[0]                        
         # "http://www.ensembl.org/id/" ? What about historic versions?????
 
         return report_urls
 
 # <LICENSE>
-# Copyright (C) 2016-2023 VariantValidator Contributors
+# Copyright (C) 2016-2024 VariantValidator Contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as

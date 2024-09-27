@@ -1,9 +1,9 @@
-from Bio.Seq import Seq
 import requests
 import functools
 import logging
 import re
 import copy
+from VariantValidator.modules import seq_data
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ def ensembl_tark(id, endpoint, options=False):
     }
 
     # Set base URL
-    base_url = 'http://dev-tark.ensembl.org'
+    base_url = 'https://tark.ensembl.org'
 
 
     headers = {
@@ -455,12 +455,11 @@ def pro_delins_info(prot_ref_seq, prot_var_seq, in_frame=False):
             return info
 
 
-def translate(ed_seq, cds_start):
+def translate(ed_seq, cds_start, modified_aa=None):
     """
     Translate c. reference sequences, including those that have been modified
     must have the CDS in the specified position
     """
-    # ed_seq = ed_seq.replace('\n', '')
     ed_seq = ed_seq.strip()
     # Ensure the starting codon is in the correct position
     met = ed_seq[cds_start:cds_start + 3]
@@ -472,12 +471,57 @@ def translate(ed_seq, cds_start):
     """
     if (met == 'ATG') or (met == 'atg') or (met == 'TTG') or (met == 'ttg') or (met == 'CTG') or (met == 'ctg') \
         or (met == 'GTG') or (met == 'gtg') or (met == 'ATT') or (met == 'att') or (met == 'ATC') or (met == 'atc') \
-        or (met == 'ATA') or (met == 'ata'):
+        or (met == 'ATA') or (met == 'ata') or (met == 'ACG') or (met == 'acg'):
+
         # Remove the 5 prime UTR
-        sequence = ed_seq[cds_start:]
-        coding_dna = Seq(str(sequence))
+        coding_sequence = ed_seq[cds_start:].upper()
+
+        # Translation table
+        translation_dict = \
+            {
+                ('TCT', 'TCC', 'TCA', 'TCG', 'AGT', 'AGC'): 'S', ('TTA', 'TTG', 'CTT', 'CTC', 'CTA', 'CTG'): 'L',
+                ('TGT', 'TGC'): 'C', 'TGG': 'W', ('GAA', 'GAG'): 'E', ('GAT', 'GAC'): 'D', ('CCT', 'CCC', 'CCA',
+                                                                                            'CCG'): 'P',
+                ('GTT', 'GTC', 'GTA', 'GTG'): 'V', ('AAT', 'AAC'): 'N', 'ATG': 'M', ('AAA', 'AAG'): 'K', ('TAT',
+                                                                                                          'TAC'): 'Y',
+                ('ATT', 'ATC', 'ATA'): 'I', ('CAA', 'CAG'): 'Q', ('TTT', 'TTC'): 'F', ('CGT', 'CGC', 'CGA', 'CGG',
+                                                                                       'AGA', 'AGG'): 'R',
+                ('ACT', 'ACC', 'ACA', 'ACG'): 'T', ('GCT', 'GCC', 'GCA', 'GCG'): 'A', ('GGT', 'GGC', 'GGA', 'GGG'): 'G',
+                ('CAT', 'CAC'): 'H', ('TAA', 'TAG', 'TGA'): '*'
+
+            }
+
+        translation_dict_sel = \
+            {
+                ('TCT', 'TCC', 'TCA', 'TCG', 'AGT', 'AGC'): 'S', ('TTA', 'TTG', 'CTT', 'CTC', 'CTA', 'CTG'): 'L',
+                ('TGT', 'TGC'): 'C', 'TGG': 'W', ('GAA', 'GAG'): 'E', ('GAT', 'GAC'): 'D', ('CCT', 'CCC', 'CCA',
+                                                                                            'CCG'): 'P',
+                ('GTT', 'GTC', 'GTA', 'GTG'): 'V', ('AAT', 'AAC'): 'N', 'ATG': 'M', ('AAA', 'AAG'): 'K', ('TAT',
+                                                                                                          'TAC'): 'Y',
+                ('ATT', 'ATC', 'ATA'): 'I', ('CAA', 'CAG'): 'Q', ('TTT', 'TTC'): 'F', ('CGT', 'CGC', 'CGA', 'CGG',
+                                                                                       'AGA', 'AGG'): 'R',
+                ('ACT', 'ACC', 'ACA', 'ACG'): 'T', ('GCT', 'GCC', 'GCA', 'GCG'): 'A', ('GGT', 'GGC', 'GGA', 'GGG'): 'G',
+                ('CAT', 'CAC'): 'H', ('TAA', 'TAG'): '*', 'TGA': 'U'
+
+            }
+
+        if modified_aa == "Sec":
+            use_dict = translation_dict_sel
+        else:
+            use_dict = translation_dict
+
         # Translate
-        trans = coding_dna.translate()
+        codon_list = [coding_sequence[i:i+3] for i in range(0, len(coding_sequence), 3)]
+        translation = []
+        for codon in codon_list:
+            for key, val in use_dict.items():
+                if str(codon) in key:
+                    translation.append(val)
+                    break
+                else:
+                    continue
+
+        trans = "".join(translation)
         aain = list(trans)
         aaout = []
         count = 0
@@ -507,7 +551,7 @@ def one_to_three(seq):
         'K': 'Lys', 'L': 'Leu', 'M': 'Met', 'N': 'Asn',
         'P': 'Pro', 'Q': 'Gln', 'R': 'Arg', 'S': 'Ser',
         'T': 'Thr', 'V': 'Val', 'W': 'Trp', 'Y': 'Tyr',
-        '*': 'Ter'}
+        '*': 'Ter', 'U': 'Sec'}
 
     oned = list(seq)
     out = []
@@ -525,7 +569,7 @@ def three_to_one(seq):
         'Ala': 'A', 'Cys': 'C', 'Asp': 'D', 'Glu': 'E',
         'Phe': 'F', 'Gly': 'G', 'His': 'H', 'Ile': 'I',
         'Lys': 'K', 'Leu': 'L', 'Met': 'M', 'Asn': 'N',
-        'Pro': 'P', 'Gln': 'Q', 'Arg': 'R', 'ser': 'S',
+        'Pro': 'P', 'Gln': 'Q', 'Arg': 'R', 'Ser': 'S',
         'Thr': 'T', 'Val': 'V', 'Trp': 'W', 'Tyr': 'Y',
         'Ter': '*'}
 
@@ -569,6 +613,61 @@ def hgvs_dup2indel(hgvs_seq):
     return string
 
 
+def get_exon_boundary_list(variant, validator):
+    """
+    Function to get the exon boundaries of a transcript
+    """
+    # Get the transcript
+    transcript = variant.quibble.split(':')[0]
+    if transcript.startswith('NM_' or 'NR_' or 'ENST'):
+        # Get alignment options and identify the relevant primary assembly chrom
+        mapping_options = validator.hdp.get_tx_mapping_options(transcript)
+        chromosome_reference = None
+        for option in mapping_options:
+            is_in_assembly = seq_data.to_chr_num_refseq(option[1], variant.primary_assembly)
+            if is_in_assembly is not None:
+                chromosome_reference = option[1]
+                break
+
+        # Set the offsets for CDS
+        transcript_info = validator.hdp.get_tx_identity_info(transcript)
+        try:
+            cds_offset = int(transcript_info[3]) + 1
+        except ValueError:
+            cds_offset = 0
+        except TypeError:
+            cds_offset = 0
+        try:
+            cds_end = int(transcript_info[4])
+        except ValueError:
+            cds_end = 0
+        except TypeError:
+            cds_end = 0
+
+        # Get the exon boundaries of the transcript
+        exons = validator.hdp.get_tx_exons(transcript, chromosome_reference, validator.alt_aln_method)
+
+        # Extract the exon boundaries
+        exon_boundaries = []
+        exon_boundaries.append(transcript)
+        exon_boundaries.append(chromosome_reference)
+
+        for exon in exons:
+            # Set the exon boundaries
+            if exon[5] > cds_end:
+                exon_boundaries.append(f"*{str(exon[5]+1 - cds_end)}")
+            else:
+                exon_boundaries.append(str(exon[5]+1 - (cds_offset-1)))
+            if exon[6] > cds_end:
+                exon_boundaries.append(f"*{str(exon[6] - cds_end)}")
+            else:
+                exon_boundaries.append(str(exon[6] - (cds_offset-1)))
+
+        return exon_boundaries
+    else:
+        raise ExonMappingError(f"{transcript} is not a valid transcript reference sequence ID")
+
+
 # Custom Exceptions
 class VariantValidatorError(Exception):
     pass
@@ -589,8 +688,12 @@ class DatabaseConnectionError(Exception):
 class ObsoleteSeqError(Exception):
     pass
 
+
+class ExonMappingError(Exception):
+    pass
+
 # <LICENSE>
-# Copyright (C) 2016-2023 VariantValidator Contributors
+# Copyright (C) 2016-2024 VariantValidator Contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as

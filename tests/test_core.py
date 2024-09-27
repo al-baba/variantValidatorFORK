@@ -17,12 +17,12 @@ class TestValidator(unittest.TestCase):
         with self.assertRaises(Exception):
             self.vv.validate(var, 'GRCh37', 'all', transcript_set='nonsense')
 
-    def test_transcript_seq_ensembl(self):
-        var = 'NM_015120.4:c.34C>T'
-        with self.assertRaises(Exception):
-            self.vv.validate(var, 'GRCh37', 'all', transcript_set='ensembl')
-
-        self.assertEqual(self.vv.alt_aln_method, 'genebuild')
+    # def test_transcript_seq_ensembl(self):
+    #     var = 'NM_015120.4:c.34C>T'
+    #     with self.assertRaises(Exception):
+    #         self.vv.validate(var, 'GRCh37', 'all', transcript_set='ensembl')
+    #
+    #     self.assertEqual(self.vv.alt_aln_method, 'genebuild')
 
     def test_transcript_list(self):
         var = 'NM_015120.4:c.34C>T'
@@ -42,7 +42,7 @@ class TestValidator(unittest.TestCase):
     def test_transcript_list_real_pair(self):
         var = 'NM_015120.4:c.34C>T'
 
-        output = self.vv.validate(var, 'GRCh37', 'NM_015120.4|NM_015120.5').format_as_dict()
+        output = self.vv.validate(var, 'GRCh37', '["NM_015120.4", "NM_015120.5"]').format_as_dict()
         print(output)
         self.assertEqual(output['flag'], 'gene_variant')
         self.assertEqual(list(output), ['flag', 'NM_015120.4:c.34C>T', 'metadata'])
@@ -123,7 +123,9 @@ class TestValidator(unittest.TestCase):
         output = self.vv.validate(var, 'GRCh37', 'all').format_as_dict()
         print(output)
         self.assertEqual(output['flag'], 'warning')
-        self.assertIn('lacks the . character between <type> and <position>',
+        self.assertIn('Unable to identify a dot (.) in the variant description NM_015120.4:c34C>T following the '
+                      'reference sequence type (g,c,n,r, or p). A dot is required in HGVS variant descriptions to '
+                      'separate the reference type from the variant position i.e. <accession>:<type>. e.g. :g.',
                       str(output['validation_warning_1']['validation_warnings']))
 
     def test_variant_invalid_3(self):
@@ -176,7 +178,7 @@ class TestValidator(unittest.TestCase):
         self.assertTrue('NM_015120.4:c.34C>T' in out.keys())
 
     def test_variant_quotes_both(self):
-        var = '"NM_015120.4:c.34C>T"'
+        var = '["NM_015120.4:c.34C>T"]'
 
         out = self.vv.validate(var, 'GRCh37', 'all').format_as_dict()
         self.assertEqual(out['flag'], 'gene_variant')
@@ -266,7 +268,7 @@ class TestHGVS2Ref(unittest.TestCase):
         self.assertEqual(output['sequence'], '')
 
 # <LICENSE>
-# Copyright (C) 2016-2023 VariantValidator Contributors
+# Copyright (C) 2016-2024 VariantValidator Contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as

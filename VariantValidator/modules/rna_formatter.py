@@ -56,6 +56,7 @@ class RnaDescriptions(object):
         edit = edit.replace("g", "G")
         edit = edit.replace("c", "C")
         edit = edit.replace("a", "A")
+        edit = edit.replace("dTp", "dup")
 
         # vv_hgvs requires c. for processing because r. is not handled correctly, so we swap to c.
         self.dna_variant = reference + ":c." + edit
@@ -66,7 +67,10 @@ class RnaDescriptions(object):
         :param variant_string:
         :return: None
         """
-        reference, edit = variant_string.split(":c.")
+        if "c." in variant_string:
+            reference, edit = variant_string.split(":c.")
+        else:
+            reference, edit = variant_string.split(":r.")
         edit = edit.replace("T", "u")
         edit = edit.replace("G", "g")
         edit = edit.replace("C", "c")
@@ -97,7 +101,7 @@ class RnaDescriptions(object):
         self.protein_variant = protein_variant
         self.protein_variant_slr = protein_variant_slr
 
-    def check_syntax(self, variant_string):
+    def check_syntax(self, variant_string, variant):
         """
         Checks the syntax of the variant string which is a submitted cRNA description string and performs necessary
         transformations to populate the object
@@ -123,7 +127,10 @@ class RnaDescriptions(object):
         self.replace_and_upper(self.input)
 
         # parse the string into hgvs object
-        hgvs_rna = self.parse(self.dna_variant, self.vfo)
+        if "NR_" in self.input or variant.transcript_type == "n":
+            raise RnaVariantSyntaxError("Invalid variant type for non-coding transcript. Instead use n.")
+        else:
+            hgvs_rna = self.parse(self.dna_variant, self.vfo)
 
         # normalize
         hgvs_rna = self.cross_normalizer.normalize(hgvs_rna)
@@ -148,7 +155,7 @@ class RnaDescriptions(object):
         return variant_dict
 
 # <LICENSE>
-# Copyright (C) 2016-2023 VariantValidator Contributors
+# Copyright (C) 2016-2024 VariantValidator Contributors
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
